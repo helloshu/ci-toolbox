@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       platforms:
-        description: "Comma separated subset of: android,linux,windows,macos"
+        description: "Comma separated subset of: android,linux,windows,macos,ios"
         type: string
         default: "android,linux,windows,macos"
       publish_release:
@@ -57,13 +57,18 @@ jobs:
             tasks: ":androidApp:assembleNoneRelease"
           - id: linux
             os: ubuntu-latest
-            tasks: ":desktopApp:packageReleaseDeb :desktopApp:packageReleaseAppImage :desktopApp:packageReleaseDistributable"
+            tasks: ":desktopApp:packageReleaseDeb :desktopApp:packageReleaseAppImage"
           - id: windows
             os: windows-latest
             tasks: ":desktopApp:packageReleaseMsi"
           - id: macos
             os: macos-15
             tasks: ":desktopApp:packageReleaseDmg"
+          # upstream ships an XcodeGen project (iosApp/) that is not published yet;
+          # opt-in only; unsigned, so it needs re-signing to run on a device.
+          - id: ios
+            os: macos-15
+            tasks: ""
     steps:
       - name: Skip unrequested platform
         id: gate
@@ -134,6 +139,13 @@ jobs:
 
       # prost-build shells out to protoc for the agent protobufs; the runner
       # images do not ship it on every OS.
+      - name: Install XcodeGen
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'ios'
+        shell: bash
+        run: |
+          brew install xcodegen
+          xcodegen --version
+
       - name: Install protobuf compiler
         if: steps.gate.outputs.run == 'true'
         shell: bash
@@ -179,8 +191,26 @@ jobs:
           KEY_PASS: ${{ secrets.SIGN_KG_KEY_PASS }}
         run: ./targets/kg/scripts/install-signing.sh "$PWD/src/kg"
 
+      - name: Build (iOS, unsigned)
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'ios'
+        shell: bash
+        working-directory: src/kg
+        run: |
+          set -o pipefail
+          ( cd iosApp && xcodegen generate )
+          xcodebuild \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme Keyguard \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
       - name: Build
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && matrix.id != 'ios'
         shell: bash
         working-directory: src/kg
         env:
@@ -188,7 +218,7 @@ jobs:
           # archive. On the headless linux runner that either fails or never
           # returns, and it only affects startup time, so it is skipped there.
           DISPLAY_WRAPPER: ${{ matrix.id == 'linux' && 'xvfb-run -a' || '' }}
-          EXTRA_GRADLE_ARGS: ${{ matrix.id == 'linux' && '-x createReleaseAotArchive' || '' }}
+          EXTRA_GRADLE_ARGS: ${{ matrix.id == 'linux' && '-x createReleaseAotArchive -x packageReleaseDistributable' || '' }}
         run: |
           # shellcheck disable=SC2086
           ${DISPLAY_WRAPPER:-} ./gradlew ${EXTRA_GRADLE_ARGS:-} ${{ matrix.tasks }} \
@@ -208,6 +238,16 @@ jobs:
               apk="$(find src/kg/androidApp/build/outputs/apk/none/release -name '*.apk' ! -name '*unsigned*' | head -1)"
               [ -n "$apk" ] || apk="$(find src/kg/androidApp/build/outputs/apk/none/release -name '*.apk' | head -1)"
               cp "$apk" "$out/${{ matrix.id }}/a-android.apk"
+              ;;
+            ios)
+              app="src/kg/build/ios/Build/Products/Release-iphoneos/Keyguard.app"
+              if [ -d "$app" ]; then
+                mkdir -p "$out/${{ matrix.id }}/Payload"
+                cp -R "$app" "$out/${{ matrix.id }}/Payload/"
+                ( cd "$out/${{ matrix.id }}" && zip -qry kg-ios-unsigned.ipa Payload && rm -rf Payload )
+              else
+                echo "no Keyguard.app produced" >&2; exit 1
+              fi
               ;;
             *)
               # Compose puts the packages under build/compose/binaries/main-release
