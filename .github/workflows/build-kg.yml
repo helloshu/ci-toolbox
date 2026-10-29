@@ -184,12 +184,14 @@ jobs:
         shell: bash
         working-directory: src/kg
         env:
-          # createReleaseAotArchive starts the packaged app to dump a CDS archive;
-          # headless runners have no display, so wrap the linux row in xvfb.
+          # createReleaseAotArchive launches the packaged app to dump an AppCDS
+          # archive. On the headless linux runner that either fails or never
+          # returns, and it only affects startup time, so it is skipped there.
           DISPLAY_WRAPPER: ${{ matrix.id == 'linux' && 'xvfb-run -a' || '' }}
+          EXTRA_GRADLE_ARGS: ${{ matrix.id == 'linux' && '-x createReleaseAotArchive' || '' }}
         run: |
           # shellcheck disable=SC2086
-          ${DISPLAY_WRAPPER:-} ./gradlew ${{ matrix.tasks }} \
+          ${DISPLAY_WRAPPER:-} ./gradlew ${EXTRA_GRADLE_ARGS:-} ${{ matrix.tasks }} \
             -Pbuildkonfig.flavor=release \
             -PversionRef=local \
             --console=plain --stacktrace \
