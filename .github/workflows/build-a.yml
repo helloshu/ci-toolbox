@@ -120,6 +120,14 @@ jobs:
           ./scripts/fetch-patches.sh targets/a
           ./scripts/prepare-upstream.sh targets/a "$PWD/src/a"
 
+      # The Linux desktop target links against X11 (keyguard-lib -> -lX11).
+      - name: Install Linux desktop build deps
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libx11-dev libxrender-dev libxtst-dev libxi-dev libxkbcommon-dev
+
       # prost-build shells out to protoc for the agent protobufs; the runner
       # images do not ship it on every OS.
       - name: Install protobuf compiler

@@ -4,8 +4,8 @@
 #
 #   ./targets/a/scripts/install-signing.sh <prepared-a-src-dir>
 #
-# Keyguard's build reads androidApp/a-release.keystore plus
-# androidApp/a-release.properties (keys: key_alias, password_store,
+# Keyguard's build reads androidApp/keyguard-release.keystore plus
+# androidApp/keyguard-release.properties (keys: key_alias, password_store,
 # password_key).  Upstream only tracks the "qa" pair, so the release pair has to
 # be provided: either from the SIGN_A_B64 secret (stable signature
 # across builds) or generated on the fly (throwaway signature).
@@ -16,8 +16,8 @@ src="${1:?usage: $0 <keyguard src dir>}"
 app_dir="$src/androidApp"
 [ -d "$app_dir" ] || { echo "no androidApp in $src" >&2; exit 2; }
 
-ks="$app_dir/a-release.keystore"
-props="$app_dir/a-release.properties"
+ks="$app_dir/keyguard-release.keystore"
+props="$app_dir/keyguard-release.properties"
 
 : "${KEY_ALIAS:=keyguard}"
 : "${KEYSTORE_PASS:=localbuild}"
