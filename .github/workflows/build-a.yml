@@ -120,6 +120,19 @@ jobs:
           ./scripts/fetch-patches.sh targets/a
           ./scripts/prepare-upstream.sh targets/a "$PWD/src/a"
 
+      # prost-build shells out to protoc for the agent protobufs; the runner
+      # images do not ship it on every OS.
+      - name: Install protobuf compiler
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          case "${{ runner.os }}" in
+            Linux)   sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler ;;
+            macOS)   brew install protobuf ;;
+            Windows) choco install protoc --no-progress -y ;;
+          esac
+          protoc --version
+
       # Serial on purpose: parallel `rustup component add` runs corrupt each
       # other's download temp files.
       - name: Rust toolchain
