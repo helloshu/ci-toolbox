@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  SDK_PLATFORM: "37"
+  SDK_PLATFORM: "37.0"
   BUILD_TOOLS: "37.0.0"
 
 jobs:

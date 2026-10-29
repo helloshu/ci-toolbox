@@ -49,5 +49,11 @@ install_pkg() {
 }
 
 for pkg in "$@"; do
-	install_pkg "$pkg"
+	if ! install_pkg "$pkg"; then
+		# `platforms;android-37` does not exist: the SDK uses minor versions
+		case "$pkg" in
+			platforms\;android-[0-9]*) install_pkg "${pkg}.0" ;;
+			*) exit 1 ;;
+		esac
+	fi
 done
