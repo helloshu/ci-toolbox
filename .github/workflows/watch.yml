@@ -1,0 +1,127 @@
+name: watch
+
+# Periodic upstream watch: check whether any pinned source commit moved, re-verify that the patch set still applies, bump the pin when it does,
+# dispatch the corresponding build, and open an issue when it does not.
+#
+# Cadence: Monday and Thursday at 03:17 UTC (Mon 11:17 / Thu 11:17 Beijing time) —
+# native cron, so no day-of-year arithmetic and no drift at month boundaries. The
+# job is a handful of `git ls-remote` calls (about a minute on a free runner), and
+# a build is only dispatched when a pinned commit actually moved.
+#
+# Patch applicability is checked against the *new* commit, so a broken patch set
+# never silently produces an unpatched build: the pin stays where it is and an
+# issue is opened instead.
+
+on:
+  schedule:
+    # Mon + Thu, 03:17 UTC. Change to '17 3 * * 1' for once a week.
+    - cron: '17 3 * * 1,4'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Re-verify and rebuild all targets even without a new commit"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # bump targets/*/source.env
+  actions: write    # dispatch build-*.yml
+  issues: write     # report patch sets that no longer apply
+
+concurrency:
+  group: watch
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: detect + verify
+    runs-on: ubuntu-latest
+    environment: build
+    timeout-minutes: 30
+    outputs:
+      builds: ${{ steps.watch.outputs.builds }}
+      builds_json: ${{ steps.watch.outputs.builds_json }}
+      broken: ${{ steps.watch.outputs.broken }}
+      any: ${{ steps.watch.outputs.any }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull private patch sets
+        env:
+          PATCHES_REPO: ${{ vars.PATCHES_REPO }}
+          PATCHES_TOKEN: ${{ secrets.PATCHES_TOKEN }}
+        run: |
+          chmod +x scripts/*.sh
+          for t in targets/*/; do ./scripts/fetch-patches.sh "${t%/}"; done
+
+      - name: Watch upstream
+        id: watch
+        shell: bash
+        run: |
+          if [ "${{ inputs.force }}" = "true" ]; then
+            ./scripts/watch-upstream.sh --force
+          else
+            ./scripts/watch-upstream.sh
+          fi
+
+      - name: Commit bumped pins
+        if: steps.watch.outputs.builds != '' && inputs.force != true
+        run: |
+          set -euo pipefail
+          git config user.name "watch"
+          git config user.email "watch@users.noreply.github.com"
+          if git diff --quiet -- 'targets/*/source.env'; then
+            echo "no pin changes"
+            exit 0
+          fi
+          git add targets/*/source.env
+          git commit -m "watch: bump pinned sources $(date -u +%F)"
+          git push
+
+  dispatch:
+    name: dispatch builds
+    needs: detect
+    if: needs.detect.outputs.builds != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        target: ${{ fromJson(needs.detect.outputs.builds_json) }}
+    steps:
+      - name: Dispatch build-${{ matrix.target }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run "build-${{ matrix.target }}.yml" --ref "${{ github.ref_name }}"
+          echo "dispatched build-${{ matrix.target }}"
+
+  report:
+    name: report broken patch sets
+    needs: detect
+    if: needs.detect.outputs.broken != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          body="$(printf '%s\n' \
+            "The periodic upstream watch found commits that the current patch set no longer applies to." \
+            "" \
+            "Broken targets: \`${{ needs.detect.outputs.broken }}\`" \
+            "" \
+            "Reproduce locally:" \
+            '```bash' \
+            'PATCHES_REPO=<owner>/<private> PATCHES_TOKEN=<pat> ./scripts/fetch-patches.sh targets/<t>' \
+            './scripts/watch-upstream.sh' \
+            '```')"
+          number="$(gh issue list --state open --search 'watch: patch set needs rework' \
+            --json number --jq '.[0].number' 2>/dev/null || true)"
+          if [ -n "$number" ] && [ "$number" != "null" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "watch: patch set needs rework" --body "$body"
+          fi

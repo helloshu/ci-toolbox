@@ -1,0 +1,32 @@
+name: check
+
+# Cheap guard: verifies that every patch set still applies to the pinned source
+# commit. Runs on every push/PR in seconds, without touching any toolchain.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  patches:
+    runs-on: ubuntu-latest
+    environment: build
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [a, b, c]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull private patch set
+        env:
+          PATCHES_REPO: ${{ vars.PATCHES_REPO }}
+          PATCHES_TOKEN: ${{ secrets.PATCHES_TOKEN }}
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/fetch-patches.sh "targets/${{ matrix.target }}"
+      - name: git apply --check
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/prepare-upstream.sh "targets/${{ matrix.target }}" "$RUNNER_TEMP/src-${matrix.target}" --check

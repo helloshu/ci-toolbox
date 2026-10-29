@@ -1,0 +1,250 @@
+name: build-a
+
+# target a — full platform matrix: Android, Linux, Windows, macOS.
+#
+# Upstream is All Rights Reserved / personal use only: the artifacts are for the
+# repository owner's own devices, do not redistribute them.
+#
+# Billing (GitHub Free, per run):
+#   ubuntu  1x | windows 2x | macOS 10x
+#   android 30 + linux 18 + windows 22*2 + macos 20*10 = 292 -> ~6 runs/month
+#   (matters only for a private repository; standard runners are free when public)
+# That is why this workflow is meant to run in a PUBLIC repository (unlimited
+# standard runners) while the patches stay in a PRIVATE repository — see
+# scripts/fetch-patches.sh and the README.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: "Comma separated subset of: android,linux,windows,macos"
+        type: string
+        default: "android,linux,windows,macos"
+      publish_release:
+        description: "Attach the artifacts to a GitHub Release"
+        type: boolean
+        default: false
+  push:
+    tags: ['a-*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: a-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  SDK_PLATFORM: "37.1"
+  BUILD_TOOLS: "37.0.0"
+  NDK: "27.0.12077973"
+  RUST_TOOLCHAIN: "beta-2026-07-15"
+  RUST_ANDROID_TARGETS: "aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android"
+  GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx5g"
+
+jobs:
+  build:
+    name: ${{ matrix.id }}
+    runs-on: ${{ matrix.os }}
+    environment: build
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: android
+            os: ubuntu-latest
+            tasks: ":androidApp:assembleNoneRelease"
+          - id: linux
+            os: ubuntu-latest
+            tasks: ":desktopApp:packageReleaseDeb :desktopApp:packageReleaseAppImage :desktopApp:packageReleaseDistributable"
+          - id: windows
+            os: windows-latest
+            tasks: ":desktopApp:packageReleaseMsi"
+          - id: macos
+            os: macos-15
+            tasks: ":desktopApp:packageReleaseDmg"
+    steps:
+      - name: Skip unrequested platform
+        id: gate
+        shell: bash
+        run: |
+          want="${{ inputs.platforms }}"
+          [ -n "$want" ] || want="android,linux,windows,macos"
+          case ",$want," in
+            *",${{ matrix.id }},"*) echo "run=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "run=false" >> "$GITHUB_OUTPUT"; echo "skipping ${{ matrix.id }}";;
+          esac
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+
+      - uses: actions/setup-java@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # Explicit cache instead of setup-java's `cache: gradle`: at that point the
+      # repository has no gradlew yet (the upstream tree is cloned later).
+      - name: Cache Gradle and Kotlin
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.konan
+          key: gradle-${{ runner.os }}-${{ hashFiles('targets/**/patches/**', 'targets/**/source.env') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - uses: android-actions/setup-android@v3
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'android'
+
+      - name: Install SDK packages
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'android'
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager --install "platforms;android-${SDK_PLATFORM}" "build-tools;${BUILD_TOOLS}" "ndk;${NDK}"
+
+      # Compose Desktop needs WiX 3 to build an MSI.
+      - name: Install WiX (Windows installer toolkit)
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'windows'
+        shell: bash
+        run: choco install wixtoolset --no-progress -y
+
+      - name: Fetch source and apply patches
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          chmod +x scripts/*.sh targets/a/scripts/*.sh
+          ./scripts/fetch-patches.sh targets/a
+          ./scripts/prepare-upstream.sh targets/a "$PWD/src/a"
+
+      # Serial on purpose: parallel `rustup component add` runs corrupt each
+      # other's download temp files.
+      - name: Rust toolchain
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup component add --toolchain "$RUST_TOOLCHAIN" clippy rustfmt
+          if [ "${{ matrix.id }}" = "android" ]; then
+            for t in $RUST_ANDROID_TARGETS; do
+              rustup target add --toolchain "$RUST_TOOLCHAIN" "$t"
+            done
+          fi
+          rustup show active-toolchain
+
+      - name: Cache Cargo and Rust toolchain
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.rustup/toolchains
+          key: cargo-${{ matrix.id }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('targets/a/patches/**') }}
+
+      - name: Release signing material
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'android'
+        shell: bash
+        env:
+          SIGN_A_B64: ${{ secrets.SIGN_A_B64 }}
+          KEYSTORE_PASS: ${{ secrets.SIGN_A_PASS }}
+          KEY_PASS: ${{ secrets.SIGN_A_KEY_PASS }}
+        run: ./targets/a/scripts/install-signing.sh "$PWD/src/a"
+
+      - name: Build
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        working-directory: src/a
+        run: |
+          # shellcheck disable=SC2086
+          ./gradlew ${{ matrix.tasks }} \
+            -Pbuildkonfig.flavor=release \
+            -PversionRef=local \
+            --console=plain --stacktrace \
+            --max-workers=4
+
+      - name: Collect artifacts
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$GITHUB_WORKSPACE/out"; mkdir -p "$out/${{ matrix.id }}"
+          case "${{ matrix.id }}" in
+            android)
+              apk="$(find src/a/androidApp/build/outputs/apk/none/release -name '*.apk' ! -name '*unsigned*' | head -1)"
+              [ -n "$apk" ] || apk="$(find src/a/androidApp/build/outputs/apk/none/release -name '*.apk' | head -1)"
+              cp "$apk" "$out/${{ matrix.id }}/a-android.apk"
+              ;;
+            *)
+              # Compose puts the packages under build/compose/binaries/main-release
+              find src/a/desktopApp/build/compose/binaries -type f \( -name '*.msi' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.tar' -o -name '*.tar.gz' \) \
+                -exec cp {} "$out/${{ matrix.id }}/" \; || true
+              ;;
+          esac
+          ls -la "$out/${{ matrix.id }}"
+
+      - name: Checksums
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        working-directory: out
+        run: sha256sum "${{ matrix.id }}"/* >> SHA256SUMS || true
+
+      - uses: actions/upload-artifact@v4
+        if: steps.gate.outputs.run == 'true'
+        with:
+          name: a-${{ matrix.id }}
+          path: out/${{ matrix.id }}/*
+          if-no-files-found: warn
+          retention-days: 14
+
+  source:
+    # The corresponding source is platform independent; pack it once.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch source and apply patches
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/fetch-patches.sh targets/a
+          ./scripts/prepare-upstream.sh targets/a "$PWD/src/a"
+      - name: Tarball
+        run: |
+          mkdir -p out
+          ./scripts/make-source-tarball.sh src/a out/a-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: a-source
+          path: out/a-source.tar.gz
+          retention-days: 14
+
+  publish:
+    needs: [build, source]
+    if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release
+    runs-on: ubuntu-latest
+    environment: build
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          RELEASE_REPO: ${{ vars.RELEASE_REPO }}
+        run: |
+          cd artifacts && sha256sum * > SHA256SUMS 2>/dev/null || true; cd ..
+          tag="${GITHUB_REF_NAME}"
+          case "$tag" in a-*) ;; *) tag="a-${GITHUB_RUN_NUMBER}" ;; esac
+          repo="${RELEASE_REPO:-$GITHUB_REPOSITORY}"
+          gh release create "$tag" artifacts/* \
+            --title "build-a ${tag}" \
+            --notes-file targets/a/notes.md \
+            --repo "$repo" || \
+          gh release upload "$tag" artifacts/* --clobber --repo "$repo"

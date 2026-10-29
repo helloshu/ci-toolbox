@@ -1,0 +1,130 @@
+name: build-c
+
+# target c — iOS: premium configuration, unsigned artifact.
+# Upstream is GPLv3: each release also carries the corresponding patched source.
+# macOS runners are billed 10x on private repositories; free on public ones.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Attach the artifacts to a GitHub Release"
+        type: boolean
+        default: false
+  push:
+    tags: ['c-*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: c-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: vars.BUILD_C != 'false'
+    runs-on: macos-15
+    environment: build
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          # upstream pins the Xcode it is tested with; runner images usually lag
+          # behind, so fall back to the image default when it is absent.
+          wanted="$(cat targets/c/xcode-version.txt 2>/dev/null || echo)"
+          if [ -n "$wanted" ] && [ -d "/Applications/Xcode_${wanted}.app" ]; then
+            sudo xcode-select -s "/Applications/Xcode_${wanted}.app"
+          else
+            echo "Xcode ${wanted:-unknown} not installed, using the image default"
+          fi
+          xcodebuild -version
+
+      - name: Fetch source and apply patches
+        env:
+          PATCHES_REPO: ${{ vars.PATCHES_REPO }}
+          PATCHES_TOKEN: ${{ secrets.PATCHES_TOKEN }}
+        run: |
+          chmod +x scripts/*.sh
+          ./scripts/fetch-patches.sh targets/c
+          ./scripts/prepare-upstream.sh targets/c "$PWD/src/c"
+
+      - name: Verify build conditions
+        run: python3 targets/c/scripts/verify-always-premium.py src/c
+
+      - name: Generate build-time secrets file
+        working-directory: src/c
+        env:
+          CLOUD_SECRETS_SH: ${{ secrets.CLOUD_SECRETS_SH }}
+        run: |
+          mkdir -p fastlane/scripts
+          if [ -n "${CLOUD_SECRETS_SH:-}" ]; then
+            printf '%s\n' "$CLOUD_SECRETS_SH" > fastlane/scripts/.cloud-access-secrets.sh
+          else
+            cat > fastlane/scripts/.cloud-access-secrets.sh <<'SECRETS'
+          #!/bin/sh
+          export BOX_CLIENT_ID=placeholder-box-client-id
+          export BOX_CLIENT_SECRET=placeholder-box-client-secret
+          export DROPBOX_APP_KEY=placeholderdropboxkey
+          export GOOGLE_DRIVE_CLIENT_ID=placeholder-google-client-id.apps.googleusercontent.com
+          export GOOGLE_DRIVE_REDIRECT_URL_SCHEME=com.googleusercontent.apps.placeholder-google-client-id
+          export MICROSOFT_GRAPH_CLIENT_ID=00000000-0000-0000-0000-000000000000
+          export MICROSOFT_GRAPH_REDIRECT_URI_SCHEME=msauth.org.cryptomator.ios
+          export PCLOUD_APP_KEY=placeholderpcloudkey
+          SECRETS
+          fi
+          cd fastlane
+          sh ./scripts/create-app-constants.sh org.cryptomator.ios
+          sh ./scripts/create-cloud-access-secrets.sh freemium
+
+      - name: Build (unsigned)
+        working-directory: src/c
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Cryptomator.xcodeproj \
+            -scheme Cryptomator \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            SWIFT_ACTIVE_COMPILATION_CONDITIONS='$(inherited) ALWAYS_PREMIUM' \
+            build
+
+      - name: Package unsigned artifacts
+        run: |
+          set -euo pipefail
+          app="src/c/build/DerivedData/Build/Products/Release-iphoneos/Cryptomator.app"
+          out="$GITHUB_WORKSPACE/out"; mkdir -p "$out"
+          mkdir -p "$out/Payload"
+          cp -R "$app" "$out/Payload/"
+          ( cd "$out" && zip -qry c-unsigned.ipa Payload && rm -rf Payload )
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$out/c-unsigned.app.zip"
+          cd "$out" && shasum -a 256 *.ipa *.zip > SHA256SUMS
+          cd "$GITHUB_WORKSPACE"
+          ./scripts/make-source-tarball.sh src/c out/c-source.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          case "$tag" in c-*) ;; *) tag="c-${GITHUB_RUN_NUMBER}" ;; esac
+          gh release create "$tag" out/* \
+            --title "build-c ${tag}" \
+            --notes-file "$GITHUB_WORKSPACE/targets/c/notes.md" \
+            --repo "$GITHUB_REPOSITORY" || \
+          gh release upload "$tag" out/* --clobber --repo "$GITHUB_REPOSITORY"

@@ -1,0 +1,10 @@
+// Local build helper: disables the "lint vital" analysis that AGP runs as part of
+// assembleRelease. It is pure static analysis, produces no artifact needed for the
+// APK, and dominates the build time of this project.
+allprojects {
+	tasks.configureEach { task ->
+		if (task.name.startsWith("lintVital")) {
+			task.enabled = false
+		}
+	}
+}

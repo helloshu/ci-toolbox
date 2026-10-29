@@ -1,0 +1,19 @@
+# build inputs/outputs
+/src/
+/out/
+*.apk
+*.ipa
+*.zip
+*.tar.gz
+
+# signing material
+*.jks
+*.keystore
+*-release.properties
+
+# local
+.DS_Store
+
+# local design notes, not published
+PLAN.md
+plan.json
