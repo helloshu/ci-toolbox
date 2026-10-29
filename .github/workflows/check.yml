@@ -29,4 +29,4 @@ jobs:
       - name: git apply --check
         run: |
           chmod +x scripts/*.sh
-          ./scripts/prepare-upstream.sh "targets/${{ matrix.target }}" "$RUNNER_TEMP/src-${matrix.target}" --check
+          ./scripts/prepare-upstream.sh "targets/${{ matrix.target }}" "$RUNNER_TEMP/src-${{ matrix.target }}" --check
