@@ -224,7 +224,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.gate.outputs.run == 'true'
         with:
-          name: a-${{ matrix.id }}
+          name: kg-${{ matrix.id }}
           path: out/${{ matrix.id }}/*
           if-no-files-found: warn
           retention-days: 14
@@ -250,7 +250,7 @@ jobs:
           ./scripts/make-source-tarball.sh src/kg out/kg-source.tar.gz
       - uses: actions/upload-artifact@v4
         with:
-          name: a-source
+          name: kg-source
           path: out/kg-source.tar.gz
           retention-days: 14
 
