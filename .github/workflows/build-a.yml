@@ -98,15 +98,10 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('targets/**/patches/**', 'targets/**/source.env') }}
           restore-keys: gradle-${{ runner.os }}-
 
-      - uses: android-actions/setup-android@v3
-        if: steps.gate.outputs.run == 'true' && matrix.id == 'android'
-
       - name: Install SDK packages
         if: steps.gate.outputs.run == 'true' && matrix.id == 'android'
         shell: bash
-        run: |
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager --install "platforms;android-${SDK_PLATFORM}" "build-tools;${BUILD_TOOLS}" "ndk;${NDK}"
+        run: ./scripts/install-android-sdk.sh "platforms;android-${SDK_PLATFORM}" "build-tools;${BUILD_TOOLS}" "ndk;${NDK}"
 
       # Compose Desktop needs WiX 3 to build an MSI.
       - name: Install WiX (Windows installer toolkit)
@@ -117,6 +112,9 @@ jobs:
       - name: Fetch source and apply patches
         if: steps.gate.outputs.run == 'true'
         shell: bash
+        env:
+          PATCHES_REPO: ${{ vars.PATCHES_REPO }}
+          PATCHES_TOKEN: ${{ secrets.PATCHES_TOKEN }}
         run: |
           chmod +x scripts/*.sh targets/a/scripts/*.sh
           ./scripts/fetch-patches.sh targets/a
@@ -209,6 +207,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Fetch source and apply patches
+        env:
+          PATCHES_REPO: ${{ vars.PATCHES_REPO }}
+          PATCHES_TOKEN: ${{ secrets.PATCHES_TOKEN }}
         run: |
           chmod +x scripts/*.sh
           ./scripts/fetch-patches.sh targets/a

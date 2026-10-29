@@ -49,12 +49,8 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('targets/**/patches/**', 'targets/**/source.env') }}
           restore-keys: gradle-${{ runner.os }}-
 
-      - uses: android-actions/setup-android@v3
-
       - name: Install SDK packages
-        run: |
-          yes | sdkmanager --licenses > /dev/null
-          sdkmanager --install "platforms;android-${SDK_PLATFORM}" "build-tools;${BUILD_TOOLS}"
+        run: ./scripts/install-android-sdk.sh "platforms;android-${SDK_PLATFORM}" "build-tools;${BUILD_TOOLS}"
 
       - name: Fetch source and apply patches
         env:
