@@ -1,4 +1,4 @@
-name: build-c
+name: build-cmi
 
 # target c — iOS: premium configuration, unsigned artifact.
 # Upstream is GPLv3: each release also carries the corresponding patched source.
@@ -12,18 +12,18 @@ on:
         type: boolean
         default: false
   push:
-    tags: ['c-*']
+    tags: ['cmi-*']
 
 permissions:
   contents: write
 
 concurrency:
-  group: c-${{ github.ref }}
+  group: cmi-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   build:
-    if: vars.BUILD_C != 'false'
+    if: vars.BUILD_CMI != 'false'
     runs-on: macos-15
     environment: build
     timeout-minutes: 60
@@ -34,7 +34,7 @@ jobs:
         run: |
           # upstream pins the Xcode it is tested with; runner images usually lag
           # behind, so fall back to the image default when it is absent.
-          wanted="$(cat targets/c/xcode-version.txt 2>/dev/null || echo)"
+          wanted="$(cat targets/cmi/xcode-version.txt 2>/dev/null || echo)"
           if [ -n "$wanted" ] && [ -d "/Applications/Xcode_${wanted}.app" ]; then
             sudo xcode-select -s "/Applications/Xcode_${wanted}.app"
           else
@@ -48,14 +48,14 @@ jobs:
           PATCHES_TOKEN: ${{ secrets.PATCHES_TOKEN }}
         run: |
           chmod +x scripts/*.sh
-          ./scripts/fetch-patches.sh targets/c
-          ./scripts/prepare-upstream.sh targets/c "$PWD/src/c"
+          ./scripts/fetch-patches.sh targets/cmi
+          ./scripts/prepare-upstream.sh targets/cmi "$PWD/src/cmi"
 
       - name: Verify build conditions
-        run: python3 targets/c/scripts/verify-always-premium.py src/c
+        run: python3 targets/cmi/scripts/verify-always-premium.py src/cmi
 
       - name: Generate build-time secrets file
-        working-directory: src/c
+        working-directory: src/cmi
         env:
           CLOUD_SECRETS_SH: ${{ secrets.CLOUD_SECRETS_SH }}
         run: |
@@ -80,7 +80,7 @@ jobs:
           sh ./scripts/create-cloud-access-secrets.sh freemium
 
       - name: Build (unsigned)
-        working-directory: src/c
+        working-directory: src/cmi
         run: |
           set -o pipefail
           xcodebuild \
@@ -99,15 +99,15 @@ jobs:
       - name: Package unsigned artifacts
         run: |
           set -euo pipefail
-          app="src/c/build/DerivedData/Build/Products/Release-iphoneos/Cryptomator.app"
+          app="src/cmi/build/DerivedData/Build/Products/Release-iphoneos/Cryptomator.app"
           out="$GITHUB_WORKSPACE/out"; mkdir -p "$out"
           mkdir -p "$out/Payload"
           cp -R "$app" "$out/Payload/"
-          ( cd "$out" && zip -qry c-unsigned.ipa Payload && rm -rf Payload )
-          ditto -c -k --sequesterRsrc --keepParent "$app" "$out/c-unsigned.app.zip"
+          ( cd "$out" && zip -qry cmi-unsigned.ipa Payload && rm -rf Payload )
+          ditto -c -k --sequesterRsrc --keepParent "$app" "$out/cmi-unsigned.app.zip"
           cd "$out" && shasum -a 256 *.ipa *.zip > SHA256SUMS
           cd "$GITHUB_WORKSPACE"
-          ./scripts/make-source-tarball.sh src/c out/c-source.tar.gz
+          ./scripts/make-source-tarball.sh src/cmi out/cmi-source.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:
@@ -122,9 +122,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF_NAME}"
-          case "$tag" in c-*) ;; *) tag="c-${GITHUB_RUN_NUMBER}" ;; esac
+          case "$tag" in cmi-*) ;; *) tag="cmi-${GITHUB_RUN_NUMBER}" ;; esac
           gh release create "$tag" out/* \
-            --title "build-c ${tag}" \
-            --notes-file "$GITHUB_WORKSPACE/targets/c/notes.md" \
+            --title "build-cmi ${tag}" \
+            --notes-file "$GITHUB_WORKSPACE/targets/cmi/notes.md" \
             --repo "$GITHUB_REPOSITORY" || \
           gh release upload "$tag" out/* --clobber --repo "$GITHUB_REPOSITORY"

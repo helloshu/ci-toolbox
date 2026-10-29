@@ -1,4 +1,4 @@
-name: build-a
+name: build-kg
 
 # target a — full platform matrix: Android, Linux, Windows, macOS.
 #
@@ -25,13 +25,13 @@ on:
         type: boolean
         default: false
   push:
-    tags: ['a-*']
+    tags: ['kg-*']
 
 permissions:
   contents: write
 
 concurrency:
-  group: a-${{ github.ref }}
+  group: kg-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -116,9 +116,9 @@ jobs:
           PATCHES_REPO: ${{ vars.PATCHES_REPO }}
           PATCHES_TOKEN: ${{ secrets.PATCHES_TOKEN }}
         run: |
-          chmod +x scripts/*.sh targets/a/scripts/*.sh
-          ./scripts/fetch-patches.sh targets/a
-          ./scripts/prepare-upstream.sh targets/a "$PWD/src/a"
+          chmod +x scripts/*.sh targets/kg/scripts/*.sh
+          ./scripts/fetch-patches.sh targets/kg
+          ./scripts/prepare-upstream.sh targets/kg "$PWD/src/kg"
 
       # The Linux desktop target links against X11 (keyguard-lib -> -lX11).
       - name: Install Linux desktop build deps
@@ -126,10 +126,11 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update -qq
-          # X11 for keyguard-lib, libudev for the FIDO2/hidapi crates.
+          # X11 for keyguard-lib, libudev for the FIDO2/hidapi crates, xvfb+gtk
+          # because :desktopApp:createReleaseAotArchive launches the packaged app.
           sudo apt-get install -y -qq \
             libx11-dev libxrender-dev libxtst-dev libxi-dev libxkbcommon-dev \
-            libudev-dev libpcsclite-dev
+            libudev-dev libpcsclite-dev libgtk-3-0 xvfb
 
       # prost-build shells out to protoc for the agent protobufs; the runner
       # images do not ship it on every OS.
@@ -167,24 +168,28 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             ~/.rustup/toolchains
-          key: cargo-${{ matrix.id }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('targets/a/patches/**') }}
+          key: cargo-${{ matrix.id }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('targets/kg/patches/**') }}
 
       - name: Release signing material
         if: steps.gate.outputs.run == 'true' && matrix.id == 'android'
         shell: bash
         env:
-          SIGN_A_B64: ${{ secrets.SIGN_A_B64 }}
-          KEYSTORE_PASS: ${{ secrets.SIGN_A_PASS }}
-          KEY_PASS: ${{ secrets.SIGN_A_KEY_PASS }}
-        run: ./targets/a/scripts/install-signing.sh "$PWD/src/a"
+          SIGN_KG_B64: ${{ secrets.SIGN_KG_B64 }}
+          KEYSTORE_PASS: ${{ secrets.SIGN_KG_PASS }}
+          KEY_PASS: ${{ secrets.SIGN_KG_KEY_PASS }}
+        run: ./targets/kg/scripts/install-signing.sh "$PWD/src/kg"
 
       - name: Build
         if: steps.gate.outputs.run == 'true'
         shell: bash
-        working-directory: src/a
+        working-directory: src/kg
+        env:
+          # createReleaseAotArchive starts the packaged app to dump a CDS archive;
+          # headless runners have no display, so wrap the linux row in xvfb.
+          DISPLAY_WRAPPER: ${{ matrix.id == 'linux' && 'xvfb-run -a' || '' }}
         run: |
           # shellcheck disable=SC2086
-          ./gradlew ${{ matrix.tasks }} \
+          ${DISPLAY_WRAPPER:-} ./gradlew ${{ matrix.tasks }} \
             -Pbuildkonfig.flavor=release \
             -PversionRef=local \
             --console=plain --stacktrace \
@@ -198,13 +203,13 @@ jobs:
           out="$GITHUB_WORKSPACE/out"; mkdir -p "$out/${{ matrix.id }}"
           case "${{ matrix.id }}" in
             android)
-              apk="$(find src/a/androidApp/build/outputs/apk/none/release -name '*.apk' ! -name '*unsigned*' | head -1)"
-              [ -n "$apk" ] || apk="$(find src/a/androidApp/build/outputs/apk/none/release -name '*.apk' | head -1)"
+              apk="$(find src/kg/androidApp/build/outputs/apk/none/release -name '*.apk' ! -name '*unsigned*' | head -1)"
+              [ -n "$apk" ] || apk="$(find src/kg/androidApp/build/outputs/apk/none/release -name '*.apk' | head -1)"
               cp "$apk" "$out/${{ matrix.id }}/a-android.apk"
               ;;
             *)
               # Compose puts the packages under build/compose/binaries/main-release
-              find src/a/desktopApp/build/compose/binaries -type f \( -name '*.msi' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.tar' -o -name '*.tar.gz' \) \
+              find src/kg/desktopApp/build/compose/binaries -type f \( -name '*.msi' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.tar' -o -name '*.tar.gz' \) \
                 -exec cp {} "$out/${{ matrix.id }}/" \; || true
               ;;
           esac
@@ -237,16 +242,16 @@ jobs:
           PATCHES_TOKEN: ${{ secrets.PATCHES_TOKEN }}
         run: |
           chmod +x scripts/*.sh
-          ./scripts/fetch-patches.sh targets/a
-          ./scripts/prepare-upstream.sh targets/a "$PWD/src/a"
+          ./scripts/fetch-patches.sh targets/kg
+          ./scripts/prepare-upstream.sh targets/kg "$PWD/src/kg"
       - name: Tarball
         run: |
           mkdir -p out
-          ./scripts/make-source-tarball.sh src/a out/a-source.tar.gz
+          ./scripts/make-source-tarball.sh src/kg out/kg-source.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: a-source
-          path: out/a-source.tar.gz
+          path: out/kg-source.tar.gz
           retention-days: 14
 
   publish:
@@ -267,10 +272,10 @@ jobs:
         run: |
           cd artifacts && sha256sum * > SHA256SUMS 2>/dev/null || true; cd ..
           tag="${GITHUB_REF_NAME}"
-          case "$tag" in a-*) ;; *) tag="a-${GITHUB_RUN_NUMBER}" ;; esac
+          case "$tag" in kg-*) ;; *) tag="kg-${GITHUB_RUN_NUMBER}" ;; esac
           repo="${RELEASE_REPO:-$GITHUB_REPOSITORY}"
           gh release create "$tag" artifacts/* \
-            --title "build-a ${tag}" \
-            --notes-file targets/a/notes.md \
+            --title "build-kg ${tag}" \
+            --notes-file targets/kg/notes.md \
             --repo "$repo" || \
           gh release upload "$tag" artifacts/* --clobber --repo "$repo"

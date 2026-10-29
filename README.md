@@ -64,9 +64,9 @@ scripts/sign-apk.sh <in.apk> <out.apk> [keystore]           # zipalign + apksign
 scripts/make-keystore.sh <out.jks> [alias]                  # throwaway signing cert
 scripts/make-source-tarball.sh <src-dir> <out.tar.gz>       # corresponding source
 
-targets/a/  source.env · patches/ · scripts/ · notes.md
-targets/b/  source.env · patches/ · no-lint.gradle · notes.md
-targets/c/  source.env · patches/ · scripts/ · xcode-version.txt · notes.md
+targets/kg/  source.env · patches/ · scripts/ · notes.md
+targets/cmima/  source.env · patches/ · no-lint.gradle · notes.md
+targets/cmi/  source.env · patches/ · scripts/ · xcode-version.txt · notes.md
 ```
 
 Each `source.env` pins `REPO` + `SHA` + `NAME`; the patches were generated against
@@ -75,21 +75,21 @@ exactly that commit, so they apply cleanly (verified by the `check` workflow).
 ## Usage
 
 ```bash
-./scripts/prepare-upstream.sh targets/b /tmp/src-b --check   # validate only
-./scripts/prepare-upstream.sh targets/b /tmp/src-b           # fetch + patch
+./scripts/prepare-upstream.sh targets/cmima /tmp/src-b --check   # validate only
+./scripts/prepare-upstream.sh targets/cmima /tmp/src-b           # fetch + patch
 ```
 
 ## Secrets / variables
 
 | name | purpose | default when absent |
 |---|---|---|
-| `SIGN_A_B64` / `SIGN_A_PASS` / `SIGN_A_KEY_PASS` | signing for target a | throwaway cert generated per run |
-| `SIGN_B_B64` / `SIGN_B_PASS` / `SIGN_B_KEY_PASS` | signing for target b | throwaway cert generated per run |
+| `SIGN_KG_B64` / `SIGN_KG_PASS` / `SIGN_KG_KEY_PASS` | signing for target a | throwaway cert generated per run |
+| `SIGN_CMA_B64` / `SIGN_CMA_PASS` / `SIGN_CMA_KEY_PASS` | signing for target b | throwaway cert generated per run |
 | `CLOUD_SECRETS_SH` | real provider credentials for target c | placeholder values (compiles, provider login does not work) |
 | `PATCHES_REPO` (variable) | `owner/patch-sets` private repository | uses the (empty) in-repo dir → build fails fast |
 | `PATCHES_TOKEN` (secret) | fine-grained PAT, `contents: read` on that repo | same |
 | `RELEASE_REPO` (variable) / `RELEASE_TOKEN` | publish releases to a private repo | release in this repo |
-| `BUILD_C` (variable) | set `false` to skip the macOS job | runs |
+| `BUILD_CMI` (variable) | set `false` to skip the macOS job | runs |
 
 Manual runs publish a Release only when `publish_release` is checked; otherwise
 artifacts stay 14–30 days.

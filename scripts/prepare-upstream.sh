@@ -4,7 +4,7 @@
 #
 #   ./scripts/prepare-upstream.sh <project-dir> <dest-dir> [--check]
 #
-# <project-dir> is one of targets/a/, targets/b/, targets/c/.
+# <project-dir> is one of targets/kg/, targets/cmima/, targets/cmi/.
 # With --check the patches are only validated against the fetched tree
 # (git apply --check); nothing is written after the clone.
 #

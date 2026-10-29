@@ -13,10 +13,10 @@ applies the patches in a temporary directory, and compiles that tree.
 
 - 上游：https://github.com/cryptomator/android 、 https://github.com/cryptomator/ios
 - 许可：GNU General Public License v3.0（见上游 `LICENSE.txt`）
-- 修改：本项目仅做最小改动以致能既有 Pro 功能可用，改动点见 `targets/b/patches/`、
-  `targets/c/patches/`
-- GPLv3 §6 对应源码：每个 Release 附 `targets/b-source.tar.gz` /
-  `targets/c-source.tar.gz`，即本次二进制对应的完整打补丁源码树
+- 修改：本项目仅做最小改动以致能既有 Pro 功能可用，改动点见 `targets/cmima/patches/`、
+  `targets/cmi/patches/`
+- GPLv3 §6 对应源码：每个 Release 附 `targets/cmimkg-source.tar.gz` /
+  `targets/cmi-source.tar.gz`，即本次二进制对应的完整打补丁源码树
 - 未使用 Cryptomator 的商标、图标或发布签名；产物并非上游官方发布，作者与上游项目无关
 
 Modifications, not upstream releases: binaries here are built from the pinned
@@ -30,7 +30,7 @@ self-signed certificates, and carry the corresponding source next to them.
   **personal use** only.」
 - 因此：本项目的 Keyguard 流水线仅用于**仓库所有者个人设备**，仓库需保持私有，
   产物不得公开分发、不得再发布
-- 修改：`targets/a/patches/0001-pro-unlock.patch`（授权判定）、
+- 修改：`targets/kg/patches/0001-pro-unlock.patch`（授权判定）、
   `0002-no-telemetry.patch`（移除 Firebase Analytics/Crashlytics 与相关插件）
 
 This build is for the repository owner's personal use only. Do not redistribute

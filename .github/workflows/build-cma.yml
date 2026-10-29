@@ -1,4 +1,4 @@
-name: build-b
+name: build-cmima
 
 # target b — Android: two release variants, entitlement unlocked, signed APKs.
 # Upstream is GPLv3: each release also carries the corresponding patched source.
@@ -11,13 +11,13 @@ on:
         type: boolean
         default: false
   push:
-    tags: ['b-*']
+    tags: ['cma-*']
 
 permissions:
   contents: write
 
 concurrency:
-  group: b-${{ github.ref }}
+  group: cma-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -58,13 +58,13 @@ jobs:
           PATCHES_TOKEN: ${{ secrets.PATCHES_TOKEN }}
         run: |
           chmod +x scripts/*.sh
-          ./scripts/fetch-patches.sh targets/b
-          ./scripts/prepare-upstream.sh targets/b "$PWD/src/b"
+          ./scripts/fetch-patches.sh targets/cmima
+          ./scripts/prepare-upstream.sh targets/cmima "$PWD/src/cmima"
 
       - name: Build release variants
-        working-directory: src/b
+        working-directory: src/cmima
         run: |
-          ./gradlew -I "$GITHUB_WORKSPACE/targets/b/no-lint.gradle" \
+          ./gradlew -I "$GITHUB_WORKSPACE/targets/cmima/no-lint.gradle" \
             :presentation:assemblePlaystoreRelease \
             :presentation:assemblePlaystoreiapRelease \
             --console=plain --stacktrace \
@@ -72,35 +72,35 @@ jobs:
 
       - name: Prepare signing keystore
         env:
-          SIGN_B_B64: ${{ secrets.SIGN_B_B64 }}
-          KEYSTORE_PASS: ${{ secrets.SIGN_B_PASS }}
-          KEY_PASS: ${{ secrets.SIGN_B_KEY_PASS }}
+          SIGN_CMA_B64: ${{ secrets.SIGN_CMA_B64 }}
+          KEYSTORE_PASS: ${{ secrets.SIGN_CMA_PASS }}
+          KEY_PASS: ${{ secrets.SIGN_CMA_KEY_PASS }}
         run: |
-          if [ -n "${SIGN_B_B64:-}" ]; then
-            echo "$SIGN_B_B64" | base64 -d > "$RUNNER_TEMP/build.jks"
+          if [ -n "${SIGN_CMA_B64:-}" ]; then
+            echo "$SIGN_CMA_B64" | base64 -d > "$RUNNER_TEMP/build.jks"
           else
             ./scripts/make-keystore.sh "$RUNNER_TEMP/build.jks" build
           fi
 
       - name: Align and sign
         env:
-          KEYSTORE_PASS: ${{ secrets.SIGN_B_PASS }}
-          KEY_PASS: ${{ secrets.SIGN_B_KEY_PASS }}
+          KEYSTORE_PASS: ${{ secrets.SIGN_CMA_PASS }}
+          KEY_PASS: ${{ secrets.SIGN_CMA_KEY_PASS }}
         run: |
           set -euo pipefail
           : "${KEYSTORE_PASS:=localbuild}"; : "${KEY_PASS:=$KEYSTORE_PASS}"
           out="$GITHUB_WORKSPACE/out"; mkdir -p "$out"
-          base="src/b/presentation/build/outputs/apk"
+          base="src/cmima/presentation/build/outputs/apk"
           ./scripts/sign-apk.sh "$base/playstore/release/presentation-playstore-release-unsigned.apk" \
-            "$out/b-universal.apk" "$RUNNER_TEMP/build.jks"
+            "$out/cma-universal.apk" "$RUNNER_TEMP/build.jks"
           ./scripts/sign-apk.sh "$base/playstoreiap/release/presentation-playstoreiap-release-unsigned.apk" \
-            "$out/b-freemium-universal.apk" "$RUNNER_TEMP/build.jks"
+            "$out/cma-freemium-universal.apk" "$RUNNER_TEMP/build.jks"
 
       - name: Checksums and source tarball
         run: |
           cd "$GITHUB_WORKSPACE/out" && sha256sum *.apk > SHA256SUMS
           cd "$GITHUB_WORKSPACE"
-          ./scripts/make-source-tarball.sh src/b out/b-source.tar.gz
+          ./scripts/make-source-tarball.sh src/cmima out/cma-source.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:
@@ -115,9 +115,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF_NAME}"
-          case "$tag" in b-*) ;; *) tag="b-${GITHUB_RUN_NUMBER}" ;; esac
+          case "$tag" in cma-*) ;; *) tag="cma-${GITHUB_RUN_NUMBER}" ;; esac
           gh release create "$tag" out/* \
-            --title "build-b ${tag}" \
-            --notes-file "$GITHUB_WORKSPACE/targets/b/notes.md" \
+            --title "build-cma ${tag}" \
+            --notes-file "$GITHUB_WORKSPACE/targets/cmima/notes.md" \
             --repo "$GITHUB_REPOSITORY" || \
           gh release upload "$tag" out/* --clobber --repo "$GITHUB_REPOSITORY"
