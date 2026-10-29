@@ -197,6 +197,9 @@ jobs:
         working-directory: src/kg
         run: |
           set -o pipefail
+          # SwiftPM resolves the local binary target before any scheme pre-action,
+          # so build the iosArm64 slice up front (same task the pre-action uses).
+          ./gradlew :appleApp:syncKeyguardSharedIosArm64ReleaseXCFrameworkForSwiftPackage
           ( cd iosApp && xcodegen generate )
           xcodebuild \
             -project iosApp/iosApp.xcodeproj \
@@ -209,19 +212,25 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
-      - name: Build
-        if: steps.gate.outputs.run == 'true' && matrix.id != 'ios'
+      # Gradle 9 refuses two jpackage tasks in one invocation when they write the
+      # same image directory (packageReleaseDeb vs packageReleaseAppImage), so the
+      # linux packages are built one per invocation. createReleaseAotArchive is
+      # skipped: it launches the packaged app and headless runners hang on it.
+      - name: Build (Linux)
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'linux'
         shell: bash
         working-directory: src/kg
-        env:
-          # createReleaseAotArchive launches the packaged app to dump an AppCDS
-          # archive. On the headless linux runner that either fails or never
-          # returns, and it only affects startup time, so it is skipped there.
-          DISPLAY_WRAPPER: ${{ matrix.id == 'linux' && 'xvfb-run -a' || '' }}
-          EXTRA_GRADLE_ARGS: ${{ matrix.id == 'linux' && '-x createReleaseAotArchive -x packageReleaseDistributable' || '' }}
+        run: |
+          ./gradlew -x createReleaseAotArchive -x packageReleaseDistributable :desktopApp:packageReleaseDeb
+          ./gradlew -x createReleaseAotArchive -x packageReleaseDistributable :desktopApp:packageReleaseAppImage
+
+      - name: Build
+        if: steps.gate.outputs.run == 'true' && matrix.id != 'ios' && matrix.id != 'linux'
+        shell: bash
+        working-directory: src/kg
         run: |
           # shellcheck disable=SC2086
-          ${DISPLAY_WRAPPER:-} ./gradlew ${EXTRA_GRADLE_ARGS:-} ${{ matrix.tasks }} \
+          ./gradlew ${{ matrix.tasks }} \
             -Pbuildkonfig.flavor=release \
             -PversionRef=local \
             --console=plain --stacktrace \
