@@ -16,7 +16,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [a, b, c]
+        target: [kg, cma, cmi]
     steps:
       - uses: actions/checkout@v4
       - name: Pull private patch set
