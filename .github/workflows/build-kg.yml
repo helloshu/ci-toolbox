@@ -17,7 +17,7 @@ on:
   workflow_dispatch:
     inputs:
       platforms:
-        description: "Comma separated subset of: android,linux,windows,macos,ios"
+        description: "Comma separated subset of: android,linux,windows,macos,ios (linux = deb + AppImage)"
         type: string
         default: "android,linux,windows,macos"
       publish_release:
@@ -55,9 +55,15 @@ jobs:
           - id: android
             os: ubuntu-latest
             tasks: ":androidApp:assembleNoneRelease"
-          - id: linux
+          # One package per row: two jpackage tasks in one invocation trip Gradle's
+          # implicit-dependency validation, and sharing the build directory between
+          # them loses generated resources (keyguard-ssh-agent).
+          - id: linux-deb
             os: ubuntu-latest
-            tasks: ":desktopApp:packageReleaseDeb :desktopApp:packageReleaseAppImage"
+            tasks: ":desktopApp:packageReleaseDeb"
+          - id: linux-appimage
+            os: ubuntu-latest
+            tasks: ":desktopApp:packageReleaseAppImage"
           - id: windows
             os: windows-latest
             tasks: ":desktopApp:packageReleaseMsi"
@@ -76,10 +82,14 @@ jobs:
         run: |
           want="${{ inputs.platforms }}"
           [ -n "$want" ] || want="android,linux,windows,macos"
-          case ",$want," in
-            *",${{ matrix.id }},"*) echo "run=true" >> "$GITHUB_OUTPUT" ;;
-            *) echo "run=false" >> "$GITHUB_OUTPUT"; echo "skipping ${{ matrix.id }}";;
+          run=false
+          case ",$want," in *",${{ matrix.id }},"*) run=true ;; esac
+          # `linux` selects both linux-* rows
+          case "${{ matrix.id }}" in
+            linux-*) case ",$want," in *",linux,"*) run=true ;; esac ;;
           esac
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          [ "$run" = true ] || echo "skipping ${{ matrix.id }}"
 
       - uses: actions/checkout@v4
         if: steps.gate.outputs.run == 'true'
@@ -127,7 +137,7 @@ jobs:
 
       # The Linux desktop target links against X11 (keyguard-lib -> -lX11).
       - name: Install Linux desktop build deps
-        if: steps.gate.outputs.run == 'true' && matrix.id == 'linux'
+        if: steps.gate.outputs.run == 'true' && startsWith(matrix.id, 'linux')
         shell: bash
         run: |
           sudo apt-get update -qq
@@ -167,6 +177,11 @@ jobs:
           rustup component add --toolchain "$RUST_TOOLCHAIN" clippy rustfmt
           if [ "${{ matrix.id }}" = "android" ]; then
             for t in $RUST_ANDROID_TARGETS; do
+              rustup target add --toolchain "$RUST_TOOLCHAIN" "$t"
+            done
+          fi
+          if [ "${{ matrix.id }}" = "ios" ]; then
+            for t in aarch64-apple-ios aarch64-apple-ios-sim aarch64-apple-darwin; do
               rustup target add --toolchain "$RUST_TOOLCHAIN" "$t"
             done
           fi
@@ -212,25 +227,17 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
-      # Gradle 9 refuses two jpackage tasks in one invocation when they write the
-      # same image directory (packageReleaseDeb vs packageReleaseAppImage), so the
-      # linux packages are built one per invocation. createReleaseAotArchive is
-      # skipped: it launches the packaged app and headless runners hang on it.
-      - name: Build (Linux)
-        if: steps.gate.outputs.run == 'true' && matrix.id == 'linux'
-        shell: bash
-        working-directory: src/kg
-        run: |
-          ./gradlew -x createReleaseAotArchive -x packageReleaseDistributable :desktopApp:packageReleaseDeb
-          ./gradlew -x createReleaseAotArchive -x packageReleaseDistributable :desktopApp:packageReleaseAppImage
-
       - name: Build
-        if: steps.gate.outputs.run == 'true' && matrix.id != 'ios' && matrix.id != 'linux'
+        if: steps.gate.outputs.run == 'true' && matrix.id != 'ios'
         shell: bash
         working-directory: src/kg
+        env:
+          # createReleaseAotArchive launches the packaged app to dump an AppCDS
+          # archive; headless linux runners hang on it and it only affects start-up.
+          EXTRA_GRADLE_ARGS: ${{ startsWith(matrix.id, 'linux') && '-x createReleaseAotArchive' || '' }}
         run: |
           # shellcheck disable=SC2086
-          ./gradlew ${{ matrix.tasks }} \
+          ./gradlew ${EXTRA_GRADLE_ARGS:-} ${{ matrix.tasks }} \
             -Pbuildkonfig.flavor=release \
             -PversionRef=local \
             --console=plain --stacktrace \
