@@ -84,7 +84,6 @@ jobs:
 
       - name: Align and sign
         env:
-          KEY_ALIAS: build
           KEYSTORE_PASS: ${{ secrets.SIGN_B_PASS }}
           KEY_PASS: ${{ secrets.SIGN_B_KEY_PASS }}
         run: |

@@ -15,13 +15,22 @@ out="${2:?}"
 ks="${3:-build-keystore.jks}"
 
 : "${ANDROID_HOME:=${ANDROID_SDK_ROOT:-}}"
-: "${KEY_ALIAS:=build}"
 : "${KEYSTORE_PASS:=localbuild}"
 : "${KEY_PASS:=$KEYSTORE_PASS}"
 
 if [ -z "$ANDROID_HOME" ]; then
 	echo "ANDROID_HOME/ANDROID_SDK_ROOT is not set" >&2
 	exit 2
+fi
+
+# Discover the alias when the caller does not name one: a keystore holds a single
+# private key here, and hard-coding the alias breaks whenever a different keystore
+# is uploaded.
+if [ -z "${KEY_ALIAS:-}" ]; then
+	KEY_ALIAS="$(keytool -list -keystore "$ks" -storepass "$KEYSTORE_PASS" 2>/dev/null |
+		awk -F, '/PrivateKeyEntry/ {print $1}' | head -1 | tr -d ' \r')"
+	[ -n "$KEY_ALIAS" ] || { echo "cannot determine key alias in $ks" >&2; exit 2; }
+	echo "key alias: $KEY_ALIAS"
 fi
 
 build_tools="$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1)"
