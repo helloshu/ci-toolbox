@@ -203,6 +203,7 @@ jobs:
   source:
     # The corresponding source is platform independent; pack it once.
     runs-on: ubuntu-latest
+    environment: build
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
