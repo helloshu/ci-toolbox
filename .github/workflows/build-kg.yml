@@ -62,9 +62,10 @@ jobs:
           - id: linux-deb
             os: ubuntu-latest
             tasks: ":desktopApp:packageReleaseDeb"
-          - id: linux-appimage
+          # tarball -> AppImage + flatpak, both packaged by the project's own scripts
+          - id: linux-packages
             os: ubuntu-latest
-            tasks: ":desktopApp:packageReleaseAppImage"
+            tasks: ""
           - id: windows
             os: windows-latest
             tasks: ":desktopApp:packageReleaseMsi"
@@ -237,8 +238,8 @@ jobs:
       # rebuilds the image without the flattened app-resources. Upstream's own CI
       # packages the release tarball into an AppImage with a checked-in script, so
       # do the same here.
-      - name: Build (Linux AppImage)
-        if: steps.gate.outputs.run == 'true' && matrix.id == 'linux-appimage'
+      - name: Build (Linux tarball + AppImage)
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'linux-packages'
         shell: bash
         working-directory: src/kg
         run: |
@@ -252,8 +253,29 @@ jobs:
           version="$(sed -nE 's/^appVersionName *= *"([^"]+)".*/\1/p' gradle/libs.versions.toml)"
           bash .github/actions/build_appimage/build.sh "${tarballs[0]}" x86_64 "$version"
 
+      # Flatpak reuses the tarball built above. It is best effort: a Flathub
+      # runtime change must not take the AppImage down with it.
+      - name: Build (Linux flatpak, best effort)
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'linux-packages'
+        continue-on-error: true
+        shell: bash
+        working-directory: src/kg
+        run: |
+          set -euo pipefail
+          df -h / | tail -1
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flatpak dbus-daemon
+          if [ -f .github/get_flatpak_runtime_version.requirements.txt ]; then
+            python3 -m pip install -q -r .github/get_flatpak_runtime_version.requirements.txt
+          fi
+          shopt -s nullglob
+          tarballs=(desktopApp/build/distributions/*-linux-x86_64.tar.gz)
+          test "${#tarballs[@]}" -ge 1
+          version="$(sed -nE 's/^appVersionName *= *"([^"]+)".*/\1/p' gradle/libs.versions.toml)"
+          bash .github/actions/build_flatpak/build.sh "${tarballs[0]}" x86_64 "$version"
+
       - name: Build
-        if: steps.gate.outputs.run == 'true' && matrix.id != 'ios' && matrix.id != 'linux-appimage'
+        if: steps.gate.outputs.run == 'true' && matrix.id != 'ios' && matrix.id != 'linux-packages'
         shell: bash
         working-directory: src/kg
         env:
@@ -300,10 +322,12 @@ jobs:
                 echo "no Keyguard.app produced" >&2; exit 1
               fi
               ;;
-            linux-appimage)
+            linux-packages)
               out_dir="$out/${{ matrix.id }}"
               find src/kg/desktopApp/build/appimage -maxdepth 1 -type f \
                 \( -name '*.AppImage' -o -name '*.AppImage.zsync' \) -exec cp {} "$out_dir/" \;
+              find src/kg/desktopApp/build/flatpak -maxdepth 1 -type f -name '*.flatpak' \
+                -exec cp {} "$out_dir/" \; 2>/dev/null || true
               ls -la "$out_dir"
               ;;
             *)

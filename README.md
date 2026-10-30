@@ -12,7 +12,9 @@ pipeline fetches its pinned source commit, applies the patch set in
 
 `a` runs a platform matrix; pick a subset at dispatch time with
 `platforms=android,linux,windows,macos` (`android,linux,windows` skips the 10x macOS
-row entirely). Only the arm64 dmg is produced — no Intel build.
+row entirely). Only the arm64 dmg is produced — no Intel build. `linux` selects
+both `linux-deb` and `linux-packages`; the latter builds the release tarball, the
+AppImage + zsync and, best effort, the flatpak.
 
 ### Billing on GitHub Free
 
