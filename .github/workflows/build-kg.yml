@@ -328,7 +328,12 @@ jobs:
 
   publish:
     needs: [build, source]
-    if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release
+    # A single flaky row (the AppImage packaging is the known offender) must not
+    # block publishing what did build: publish whatever artifacts exist and list
+    # the missing ones in the job summary.
+    if: |
+      always() && !cancelled() &&
+      (startsWith(github.ref, 'refs/tags/') || inputs.publish_release)
     runs-on: ubuntu-latest
     environment: build
     timeout-minutes: 10
@@ -337,6 +342,12 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+          # missing rows are reported below instead of failing the job
+      - name: Report what is missing
+        run: |
+          ls -R artifacts | head -40
+          echo "### artifacts present" >> "$GITHUB_STEP_SUMMARY"
+          ( cd artifacts && ls -1 ) >> "$GITHUB_STEP_SUMMARY" || true
       - name: Release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
