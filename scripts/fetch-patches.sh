@@ -18,9 +18,17 @@ set -euo pipefail
 proj="${1:?usage: $0 <target-dir>}"
 name="$(basename "$proj")"
 
-if [ -z "${PATCHES_REPO:-}" ] || [ -z "${PATCHES_TOKEN:-}" ]; then
+if [ -z "${PATCHES_REPO:-}" ] && [ -z "${PATCHES_TOKEN:-}" ]; then
 	echo "PATCHES_REPO/PATCHES_TOKEN not set, using the patch set in $proj/patches"
 	exit 0
+fi
+# A half-configured environment is almost always a missing secret injection, not an
+# intentional offline build: say so instead of failing later with "no patches".
+if [ -z "${PATCHES_REPO:-}" ] || [ -z "${PATCHES_TOKEN:-}" ]; then
+	echo "!! PATCHES_REPO=$([[ -n ${PATCHES_REPO:-} ]] && echo set || echo empty)" >&2
+	echo "!! PATCHES_TOKEN=$([[ -n ${PATCHES_TOKEN:-} ]] && echo set || echo empty)" >&2
+	echo "!! environment secret not injected; refusing to build without the patch set" >&2
+	exit 4
 fi
 
 ref="${PATCHES_REF:-main}"
