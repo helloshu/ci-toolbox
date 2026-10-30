@@ -145,7 +145,8 @@ jobs:
           # because :desktopApp:createReleaseAotArchive launches the packaged app.
           sudo apt-get install -y -qq \
             libx11-dev libxrender-dev libxtst-dev libxi-dev libxkbcommon-dev \
-            libudev-dev libpcsclite-dev libgtk-3-0 xvfb
+            libudev-dev libpcsclite-dev libgtk-3-0 xvfb \
+            desktop-file-utils zsync
 
       # prost-build shells out to protoc for the agent protobufs; the runner
       # images do not ship it on every OS.
@@ -231,8 +232,27 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
+      # The Compose packageReleaseAppImage task is not what upstream ships: it
+      # rebuilds the image without the flattened app-resources. Upstream's own CI
+      # packages the release tarball into an AppImage with a checked-in script, so
+      # do the same here.
+      - name: Build (Linux AppImage)
+        if: steps.gate.outputs.run == 'true' && matrix.id == 'linux-appimage'
+        shell: bash
+        working-directory: src/kg
+        run: |
+          set -euo pipefail
+          xvfb-run -a ./gradlew :desktopApp:packageReleaseDistributable \
+            -Pbuildkonfig.flavor=release -PversionRef=local \
+            --console=plain --stacktrace --max-workers=4
+          shopt -s nullglob
+          tarballs=(desktopApp/build/distributions/*-linux-x86_64.tar.gz)
+          test "${#tarballs[@]}" -ge 1
+          version="$(sed -nE 's/^appVersionName *= *"([^"]+)".*/\1/p' gradle/libs.versions.toml)"
+          bash .github/actions/build_appimage/build.sh "${tarballs[0]}" x86_64 "$version"
+
       - name: Build
-        if: steps.gate.outputs.run == 'true' && matrix.id != 'ios'
+        if: steps.gate.outputs.run == 'true' && matrix.id != 'ios' && matrix.id != 'linux-appimage'
         shell: bash
         working-directory: src/kg
         env:
@@ -278,6 +298,12 @@ jobs:
               else
                 echo "no Keyguard.app produced" >&2; exit 1
               fi
+              ;;
+            linux-appimage)
+              out_dir="$out/${{ matrix.id }}"
+              find src/kg/desktopApp/build/appimage -maxdepth 1 -type f \
+                \( -name '*.AppImage' -o -name '*.AppImage.zsync' \) -exec cp {} "$out_dir/" \;
+              ls -la "$out_dir"
               ;;
             *)
               # Compose puts the packages under build/compose/binaries/main-release
