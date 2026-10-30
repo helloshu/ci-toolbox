@@ -191,11 +191,15 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         uses: actions/cache@v4
         with:
+          # keyed per OS, not per matrix row: the linux-* rows and the macos rows
+          # share compiler output, so only the first one pays for the cold build
           path: |
             ~/.cargo/registry
             ~/.cargo/git
             ~/.rustup/toolchains
-          key: cargo-${{ matrix.id }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('targets/kg/patches/**') }}
+            src/kg/**/build/cargo-target
+          key: cargo-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-${{ hashFiles('targets/kg/patches/**') }}
+          restore-keys: cargo-${{ runner.os }}-${{ env.RUST_TOOLCHAIN }}-
 
       - name: Release signing material
         if: steps.gate.outputs.run == 'true' && matrix.id == 'android'
@@ -236,6 +240,13 @@ jobs:
           # archive; headless linux runners hang on it and it only affects start-up.
           EXTRA_GRADLE_ARGS: ${{ startsWith(matrix.id, 'linux') && '-x createReleaseAotArchive' || '' }}
         run: |
+          # The Compose packaging tasks copy app-resources into the image without
+          # depending on the Sync task that stages them, so stage them first in
+          # their own invocation and let the packaging run see a complete tree.
+          # shellcheck disable=SC2086
+          case "${{ matrix.id }}" in
+            linux-*) ./gradlew :desktopApp:prepareBundledAppResources ;;
+          esac
           # shellcheck disable=SC2086
           ./gradlew ${EXTRA_GRADLE_ARGS:-} ${{ matrix.tasks }} \
             -Pbuildkonfig.flavor=release \

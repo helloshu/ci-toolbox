@@ -92,7 +92,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run "build-${{ matrix.target }}.yml" --ref "${{ github.ref_name }}"
+          gh workflow run "build-${{ matrix.target }}.yml" \
+            --ref "${{ github.ref_name }}" \
+            -R "$GITHUB_REPOSITORY"
           echo "dispatched build-${{ matrix.target }}"
 
   report:
