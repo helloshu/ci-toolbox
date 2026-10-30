@@ -1,0 +1,15 @@
+name: probe
+on:
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: build
+    steps:
+      - name: report secret presence
+        env:
+          T: ${{ secrets.PATCHES_TOKEN }}
+          R: ${{ vars.PATCHES_REPO }}
+        run: |
+          echo "repo=${R:-<empty>}"
+          echo "token_len=${#T}"
