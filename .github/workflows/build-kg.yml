@@ -238,7 +238,10 @@ jobs:
         env:
           # createReleaseAotArchive launches the packaged app to dump an AppCDS
           # archive; headless linux runners hang on it and it only affects start-up.
-          EXTRA_GRADLE_ARGS: ${{ startsWith(matrix.id, 'linux') && '-x createReleaseAotArchive' || '' }}
+          # -x prepareBundledAppResources: it was staged in the invocation above; on a
+          # second run its cargo inputs resolve empty and the Sync wipes the directory,
+          # which is what made jpackage copy an image without keyguard-ssh-agent.
+          EXTRA_GRADLE_ARGS: ${{ startsWith(matrix.id, 'linux') && '-x createReleaseAotArchive -x prepareBundledAppResources' || '' }}
         run: |
           # The Compose packaging tasks copy app-resources into the image without
           # depending on the Sync task that stages them, so stage them first in
