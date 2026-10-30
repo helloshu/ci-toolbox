@@ -2,14 +2,38 @@ name: probe
 on:
   workflow_dispatch:
 jobs:
-  probe:
+  plain:
     runs-on: ubuntu-latest
     environment: build
     steps:
-      - name: report secret presence
+      - name: plain job
         env:
           T: ${{ secrets.PATCHES_TOKEN }}
-          R: ${{ vars.PATCHES_REPO }}
-        run: |
-          echo "repo=${R:-<empty>}"
-          echo "token_len=${#T}"
+        run: echo "plain token_len=${#T}"
+  matrix:
+    runs-on: ubuntu-latest
+    environment: build
+    strategy:
+      matrix:
+        include:
+          - id: x
+    steps:
+      - name: matrix job
+        env:
+          T: ${{ secrets.PATCHES_TOKEN }}
+        run: echo "matrix token_len=${#T}"
+  gated:
+    runs-on: ubuntu-latest
+    environment: build
+    strategy:
+      matrix:
+        include:
+          - id: y
+    steps:
+      - id: gate
+        run: echo "run=true" >> "$GITHUB_OUTPUT"
+      - name: gated step
+        if: steps.gate.outputs.run == 'true'
+        env:
+          T: ${{ secrets.PATCHES_TOKEN }}
+        run: echo "gated token_len=${#T}"
