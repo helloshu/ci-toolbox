@@ -46,6 +46,7 @@ jobs:
   build:
     name: ${{ matrix.id }}
     runs-on: ${{ matrix.os }}
+    environment: build
     # the ios row compiles the whole Kotlin/Native graph for iosArm64 on a
     # 4-core macOS runner: 90 minutes was not enough (job was cancelled at the limit)
     timeout-minutes: 240
